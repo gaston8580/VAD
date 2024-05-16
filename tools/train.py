@@ -38,8 +38,8 @@ sys.path.append('')
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
-    parser.add_argument('config', help='train config file path')
-    parser.add_argument('--work-dir', help='the dir to save logs and models')
+    parser.add_argument('--config', default='projects/configs/VAD/VAD_base_e2e.py', help='train config file path')
+    parser.add_argument('--work-dir', default='outputs/debug', help='the dir to save logs and models')
     parser.add_argument(
         '--resume-from', help='the checkpoint file to resume from')
     parser.add_argument(
@@ -62,6 +62,7 @@ def parse_args():
     parser.add_argument(
         '--deterministic',
         action='store_true',
+        default=True,
         help='whether to set deterministic options for CUDNN backend.')
     parser.add_argument(
         '--options',

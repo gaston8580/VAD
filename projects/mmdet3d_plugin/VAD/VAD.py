@@ -230,7 +230,7 @@ class VAD(MVXTwoStageDetector):
         Returns:
             dict: Losses of different branches.
         """
-        
+        # img: (bs，queue，cam，C，H，W)
         len_queue = img.size(1)
         prev_img = img[:, :-1, ...]
         img = img[:, -1, ...]
