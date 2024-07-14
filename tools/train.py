@@ -38,10 +38,9 @@ sys.path.append('')
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
-    parser.add_argument('config', help='train config file path')
-    parser.add_argument('--work-dir', help='the dir to save logs and models')
-    parser.add_argument(
-        '--resume-from', help='the checkpoint file to resume from')
+    parser.add_argument('--config', default='projects/configs/VAD/VAD_base_stage_1.py', help='train config file path')
+    parser.add_argument('--work-dir', default='outputs/debug', help='the dir to save logs and models')
+    parser.add_argument('--resume-from', help='the checkpoint file to resume from')
     parser.add_argument(
         '--no-validate',
         action='store_true',
@@ -62,6 +61,7 @@ def parse_args():
     parser.add_argument(
         '--deterministic',
         action='store_true',
+        default=True,
         help='whether to set deterministic options for CUDNN backend.')
     parser.add_argument(
         '--options',
@@ -152,8 +152,7 @@ def main():
         cfg.work_dir = args.work_dir
     elif cfg.get('work_dir', None) is None:
         # use config filename as default work_dir if cfg.work_dir is None
-        cfg.work_dir = osp.join('./work_dirs',
-                                osp.splitext(osp.basename(args.config))[0])
+        cfg.work_dir = osp.join('./work_dirs', osp.splitext(osp.basename(args.config))[0])
     # if args.resume_from is not None:
     if args.resume_from is not None and osp.isfile(args.resume_from):
         cfg.resume_from = args.resume_from

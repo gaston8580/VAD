@@ -66,28 +66,30 @@ class VAD(MVXTwoStageDetector):
         """Extract features of images."""
         B = img.size(0)
         if img is not None:
-            
-            # input_shape = img.shape[-2:]
-            # # update real input shape of each single img
-            # for img_meta in img_metas:
-            #     img_meta.update(input_shape=input_shape)
-
+            # 将原始img的 bs * queue * cam 看作 batch size, 方便卷积网络特征提取
+            # 待 Backbone + Neck 网络提取多尺度特征后，再把 bs * queue * cam 的维度再拆成 bs, queue, cam
             if img.dim() == 5 and img.size(0) == 1:
                 img.squeeze_()
             elif img.dim() == 5 and img.size(0) > 1:
                 B, N, C, H, W = img.size()
                 img = img.reshape(B * N, C, H, W)
             if self.use_grid_mask:
+                # GridMask: 一种数据增强方法, 遮挡部分图像的像素点
                 img = self.grid_mask(img)
 
-            img_feats = self.img_backbone(img)
+            img_feats = self.img_backbone(img)  # ResNet, 提取高级语义特征
             if isinstance(img_feats, dict):
                 img_feats = list(img_feats.values())
         else:
             return None
         if self.with_img_neck:
-            img_feats = self.img_neck(img_feats)
+            img_feats = self.img_neck(img_feats)  # FPN, 融合不同分辨率的特征图
 
+        # img_feats_list 是一个多尺度的特征列表
+        # [0]: (bs, queue, cam, 256, H / 8, W / 8)
+        # [1]: (bs, queue, cam, 256, H / 16, W / 16)
+        # [2]: (bs, queue, cam, 256, H / 32, W / 32)
+        # [3]: (bs, queue, cam, 256, H / 64, W / 64)
         img_feats_reshaped = []
         for img_feat in img_feats:
             BN, C, H, W = img_feat.size()
@@ -136,12 +138,9 @@ class VAD(MVXTwoStageDetector):
             dict: Losses of each branch.
         """
 
-        outs = self.pts_bbox_head(pts_feats, img_metas, prev_bev,
-                                  ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat)
-        loss_inputs = [
-            gt_bboxes_3d, gt_labels_3d, map_gt_bboxes_3d, map_gt_labels_3d,
-            outs, ego_fut_trajs, ego_fut_masks, ego_fut_cmd, gt_attr_labels
-        ]
+        outs = self.pts_bbox_head(pts_feats, img_metas, prev_bev, ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat)
+        loss_inputs = [gt_bboxes_3d, gt_labels_3d, map_gt_bboxes_3d, map_gt_labels_3d, outs, ego_fut_trajs, 
+                       ego_fut_masks, ego_fut_cmd, gt_attr_labels]
         losses = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
         return losses
 
@@ -173,13 +172,17 @@ class VAD(MVXTwoStageDetector):
             prev_bev = None
             bs, len_queue, num_cams, C, H, W = imgs_queue.shape
             imgs_queue = imgs_queue.reshape(bs*len_queue, num_cams, C, H, W)
+            # img_feats_list 是一个多尺度的特征列表
+            # [0]: (bs, queue, cam, 256, H / 8, W / 8)
+            # [1]: (bs, queue, cam, 256, H / 16, W / 16)
+            # [2]: (bs, queue, cam, 256, H / 32, W / 32)
+            # [3]: (bs, queue, cam, 256, H / 64, W / 64)
             img_feats_list = self.extract_feat(img=imgs_queue, len_queue=len_queue)
+            # 迭代计算每一帧的BEV特征
             for i in range(len_queue):
                 img_metas = [each[i] for each in img_metas_list]
-                # img_feats = self.extract_feat(img=img, img_metas=img_metas)
                 img_feats = [each_scale[:, i] for each_scale in img_feats_list]
-                prev_bev = self.pts_bbox_head(
-                    img_feats, img_metas, prev_bev, only_bev=True)
+                prev_bev = self.pts_bbox_head(img_feats, img_metas, prev_bev, only_bev=True)
             self.train()
             return prev_bev
 
@@ -230,10 +233,11 @@ class VAD(MVXTwoStageDetector):
         Returns:
             dict: Losses of different branches.
         """
-        
+        # img: (bs，queue，cam，C，H，W)
+        # queue：连续帧的个数, cam：每帧中包含的图像数量, C，H，W：图片的通道数，图片的高度，图片的宽度
         len_queue = img.size(1)
-        prev_img = img[:, :-1, ...]
-        img = img[:, -1, ...]
+        prev_img = img[:, :-1, ...]  # 历史帧
+        img = img[:, -1, ...]  # 当前帧
 
         prev_img_metas = copy.deepcopy(img_metas)
         # prev_bev = self.obtain_history_bev(prev_img, prev_img_metas)
