@@ -502,9 +502,9 @@ class VADHead(DETRHead):
                 Shape [nb_dec, bs, num_query, 9].
         """
         
-        bs, num_cam, _, _, _ = mlvl_feats[0].shape
+        bs = mlvl_feats[0].shape[0]  # mlvl_feats: 多层特征图
         dtype = mlvl_feats[0].dtype
-        object_query_embeds = self.query_embedding.weight.to(dtype)
+        object_query_embeds = self.query_embedding.weight.to(dtype)  # (300, 512), TODO: CHECK是300还是900, 20240531
         
         if self.map_query_embed_type == 'all_pts':
             map_query_embeds = self.map_query_embedding.weight.to(dtype)
@@ -513,11 +513,9 @@ class VADHead(DETRHead):
             map_instance_embeds = self.map_instance_embedding.weight.unsqueeze(1)
             map_query_embeds = (map_pts_embeds + map_instance_embeds).flatten(0, 1).to(dtype)
 
-        bev_queries = self.bev_embedding.weight.to(dtype)
-
-        bev_mask = torch.zeros((bs, self.bev_h, self.bev_w),
-                               device=bev_queries.device).to(dtype)
-        bev_pos = self.positional_encoding(bev_mask).to(dtype)
+        bev_queries = self.bev_embedding.weight.to(dtype)  # (200 * 200, 256), 200, 200 分别代表 BEV 特征平面的长和宽
+        bev_mask = torch.zeros((bs, self.bev_h, self.bev_w), device=bev_queries.device).to(dtype)  # (bs, 200, 200)
+        bev_pos = self.positional_encoding(bev_mask).to(dtype)  # (bs, 256, 200, 200), 把不同的 grid 位置映射到一个高维的向量空间
             
         if only_bev:  # only use encoder to obtain BEV features, TODO: refine the workaround
             return self.transformer.get_bev_features(
