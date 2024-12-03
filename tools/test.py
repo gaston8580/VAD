@@ -37,8 +37,8 @@ warnings.filterwarnings("ignore")
 def parse_args():
     parser = argparse.ArgumentParser(
         description='MMDet test (and eval) a model')
-    parser.add_argument('config', help='test config file path')
-    parser.add_argument('checkpoint', help='checkpoint file')
+    parser.add_argument('--config', default='projects/configs/VAD/VAD_base_stage_2.py', help='test config file path')
+    parser.add_argument('--checkpoint', default='outputs/20240614/epoch_60.pth', help='checkpoint file')
     parser.add_argument('--json_dir', help='json parent dir name file') # NOTE: json file parent folder name
     parser.add_argument('--out', help='output result file in pickle format')
     parser.add_argument(
@@ -56,6 +56,7 @@ def parse_args():
         '--eval',
         type=str,
         nargs='+',
+        default='bbox',
         help='evaluation metrics, which depends on the dataset, e.g., "bbox",'
         ' "segm", "proposal" for COCO, and "mAP", "recall" for PASCAL VOC')
     parser.add_argument('--show', action='store_true', help='show results')

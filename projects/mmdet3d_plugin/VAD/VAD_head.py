@@ -548,8 +548,7 @@ class VADHead(DETRHead):
                 prev_bev=prev_bev
         )
 
-        bev_embed, hs, init_reference, inter_references, \
-            map_hs, map_init_reference, map_inter_references = outputs
+        bev_embed, hs, init_reference, inter_references, map_hs, map_init_reference, map_inter_references = outputs
 
         hs = hs.permute(0, 2, 1, 3)
         outputs_classes = []
@@ -580,12 +579,9 @@ class VADHead(DETRHead):
             outputs_coords_bev.append(tmp[..., 0:2].clone().detach())
             tmp[..., 4:5] = tmp[..., 4:5] + reference[..., 2:3]
             tmp[..., 4:5] = tmp[..., 4:5].sigmoid()
-            tmp[..., 0:1] = (tmp[..., 0:1] * (self.pc_range[3] -
-                             self.pc_range[0]) + self.pc_range[0])
-            tmp[..., 1:2] = (tmp[..., 1:2] * (self.pc_range[4] -
-                             self.pc_range[1]) + self.pc_range[1])
-            tmp[..., 4:5] = (tmp[..., 4:5] * (self.pc_range[5] -
-                             self.pc_range[2]) + self.pc_range[2])
+            tmp[..., 0:1] = (tmp[..., 0:1] * (self.pc_range[3] - self.pc_range[0]) + self.pc_range[0])
+            tmp[..., 1:2] = (tmp[..., 1:2] * (self.pc_range[4] - self.pc_range[1]) + self.pc_range[1])
+            tmp[..., 4:5] = (tmp[..., 4:5] * (self.pc_range[5] - self.pc_range[2]) + self.pc_range[2])
 
             # TODO: check if using sigmoid
             outputs_coord = tmp
@@ -598,9 +594,8 @@ class VADHead(DETRHead):
             else:
                 reference = map_inter_references[lvl - 1]
             reference = inverse_sigmoid(reference)
-            map_outputs_class = self.map_cls_branches[lvl](
-                map_hs[lvl].view(bs,self.map_num_vec, self.map_num_pts_per_vec,-1).mean(2)
-            )
+            map_outputs_class = self.map_cls_branches[lvl](map_hs[lvl].view(bs,self.map_num_vec, 
+                                                                            self.map_num_pts_per_vec,-1).mean(2))
             tmp = self.map_reg_branches[lvl](map_hs[lvl])
             # TODO: check the shape of reference
             assert reference.shape[-1] == 2
@@ -679,12 +674,8 @@ class VADHead(DETRHead):
                 ca_motion_query = motion_hs.permute(1, 0, 2).flatten(0, 1).unsqueeze(0)
 
             batch_size = outputs_coords_bev[-1].shape[0]
-            motion_hs = motion_hs.permute(1, 0, 2).unflatten(
-                dim=1, sizes=(num_agent, self.fut_mode)
-            )
-            ca_motion_query = ca_motion_query.squeeze(0).unflatten(
-                dim=0, sizes=(batch_size, num_agent, self.fut_mode)
-            )
+            motion_hs = motion_hs.permute(1, 0, 2).unflatten(dim=1, sizes=(num_agent, self.fut_mode))
+            ca_motion_query = ca_motion_query.squeeze(0).unflatten(dim=0, sizes=(batch_size, num_agent, self.fut_mode))
             motion_hs = torch.cat([motion_hs, ca_motion_query], dim=-1)  # [B, A, fut_mode, 2D]
         else:
             raise NotImplementedError('Not implement yet')
