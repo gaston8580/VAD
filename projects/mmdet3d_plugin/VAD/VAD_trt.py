@@ -13,7 +13,7 @@ from projects.mmdet3d_plugin.VAD.planner.metric_stp3 import PlanningMetric
 
 
 @DETECTORS.register_module()
-class VAD(MVXTwoStageDetector):
+class VADTRT(MVXTwoStageDetector):
     """VAD model.
     """
     def __init__(self,
@@ -37,7 +37,7 @@ class VAD(MVXTwoStageDetector):
                  fut_mode=6
                  ):
 
-        super(VAD,
+        super(VADTRT,
               self).__init__(pts_voxel_layer, pts_voxel_encoder,
                              pts_middle_encoder, pts_fusion_layer,
                              img_backbone, pts_backbone, img_neck, pts_neck,
@@ -107,61 +107,42 @@ class VAD(MVXTwoStageDetector):
         
         return img_feats
 
-    def forward_pts_train(self,
-                          pts_feats,
-                          gt_bboxes_3d,
-                          gt_labels_3d,
-                          map_gt_bboxes_3d,
-                          map_gt_labels_3d,                          
-                          img_metas,
-                          gt_bboxes_ignore=None,
-                          map_gt_bboxes_ignore=None,
-                          prev_bev=None,
-                          ego_his_trajs=None,
-                          ego_fut_trajs=None,
-                          ego_fut_masks=None,
-                          ego_fut_cmd=None,
-                          ego_lcf_feat=None,
-                          gt_attr_labels=None):
-        """Forward function'
-        Args:
-            pts_feats (list[torch.Tensor]): Features of point cloud branch
-            gt_bboxes_3d (list[:obj:`BaseInstance3DBoxes`]): Ground truth
-                boxes for each sample.
-            gt_labels_3d (list[torch.Tensor]): Ground truth labels for
-                boxes of each sampole
-            img_metas (list[dict]): Meta information of samples.
-            gt_bboxes_ignore (list[torch.Tensor], optional): Ground truth
-                boxes to be ignored. Defaults to None.
-            prev_bev (torch.Tensor, optional): BEV features of previous frame.
-        Returns:
-            dict: Losses of each branch.
-        """
+    def forward(self, data):
+        img_metas = data['img_metas']
+        img = data['img']
 
-        outs = self.pts_bbox_head(pts_feats, img_metas, prev_bev, ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat)
-        loss_inputs = [gt_bboxes_3d, gt_labels_3d, map_gt_bboxes_3d, map_gt_labels_3d, outs, ego_fut_trajs, 
-                       ego_fut_masks, ego_fut_cmd, gt_attr_labels]
-        losses = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
-        return losses
+        for var, name in [(img_metas, 'img_metas')]:
+            if not isinstance(var, list):
+                raise TypeError('{} must be a list, but got {}'.format(name, type(var)))
+        img = [img] if img is None else img  ## img[0]: (bs, cam, C, H, W)
 
-    def forward_dummy(self, img):
-        dummy_metas = None
-        return self.forward_test(img=img, img_metas=[[dummy_metas]])
+        if img_metas[0][0]['scene_token'] != self.prev_frame_info['scene_token']:
+            # the first sample of each scene is truncated
+            self.prev_frame_info['prev_bev'] = None
+        # update idx
+        self.prev_frame_info['scene_token'] = img_metas[0][0]['scene_token']
 
-    def forward(self, return_loss=True, **kwargs):
-        """Calls either forward_train or forward_test depending on whether
-        return_loss=True.
-        Note this setting will change the expected inputs. When
-        `return_loss=True`, img and img_metas are single-nested (i.e.
-        torch.Tensor and list[dict]), and when `resturn_loss=False`, img and
-        img_metas should be double nested (i.e.  list[torch.Tensor],
-        list[list[dict]]), with the outer list indicating test time
-        augmentations.
-        """
-        if return_loss:
-            return self.forward_train(**kwargs)
+        # do not use temporal information
+        if not self.video_test_mode:
+            self.prev_frame_info['prev_bev'] = None
+
+        # Get the delta of ego position and angle between two timestamps.
+        tmp_pos = copy.deepcopy(img_metas[0][0]['can_bus'][:3])
+        tmp_angle = copy.deepcopy(img_metas[0][0]['can_bus'][-1])
+        if self.prev_frame_info['prev_bev'] is not None:
+            img_metas[0][0]['can_bus'][:3] -= self.prev_frame_info['prev_pos']
+            img_metas[0][0]['can_bus'][-1] -= self.prev_frame_info['prev_angle']
         else:
-            return self.forward_test(**kwargs)
+            img_metas[0][0]['can_bus'][-1] = 0
+            img_metas[0][0]['can_bus'][:3] = 0
+
+        new_prev_bev, bbox_results = self.simple_test(data, prev_bev=self.prev_frame_info['prev_bev'])
+        # During inference, we save the BEV features and ego motion of each timestamp.
+        self.prev_frame_info['prev_pos'] = tmp_pos
+        self.prev_frame_info['prev_angle'] = tmp_angle
+        self.prev_frame_info['prev_bev'] = new_prev_bev
+
+        return bbox_results
     
     def obtain_history_bev(self, imgs_queue, img_metas_list):
         """Obtain history BEV features iteratively. To save GPU memory, gradients are not calculated.
@@ -257,132 +238,40 @@ class VAD(MVXTwoStageDetector):
         losses.update(losses_pts)
         return losses
 
-    def forward_test(
-        self,
-        img_metas,
-        gt_bboxes_3d,
-        gt_labels_3d,
-        img=None,
-        ego_his_trajs=None,
-        ego_fut_trajs=None,
-        ego_fut_cmd=None,
-        ego_lcf_feat=None,
-        gt_attr_labels=None,
-        **kwargs
-    ):
-        for var, name in [(img_metas, 'img_metas')]:
-            if not isinstance(var, list):
-                raise TypeError('{} must be a list, but got {}'.format(
-                    name, type(var)))
-        img = [img] if img is None else img
+    def simple_test(self, data, prev_bev=None):
+        img_metas = data['img_metas'][0]
+        img = data['img'][0]
 
-        if img_metas[0][0]['scene_token'] != self.prev_frame_info['scene_token']:
-            # the first sample of each scene is truncated
-            self.prev_frame_info['prev_bev'] = None
-        # update idx
-        self.prev_frame_info['scene_token'] = img_metas[0][0]['scene_token']
-
-        # do not use temporal information
-        if not self.video_test_mode:
-            self.prev_frame_info['prev_bev'] = None
-
-        # Get the delta of ego position and angle between two timestamps.
-        tmp_pos = copy.deepcopy(img_metas[0][0]['can_bus'][:3])
-        tmp_angle = copy.deepcopy(img_metas[0][0]['can_bus'][-1])
-        if self.prev_frame_info['prev_bev'] is not None:
-            img_metas[0][0]['can_bus'][:3] -= self.prev_frame_info['prev_pos']
-            img_metas[0][0]['can_bus'][-1] -= self.prev_frame_info['prev_angle']
-        else:
-            img_metas[0][0]['can_bus'][-1] = 0
-            img_metas[0][0]['can_bus'][:3] = 0
-
-        new_prev_bev, bbox_results = self.simple_test(
-            img_metas=img_metas[0],
-            img=img[0],
-            prev_bev=self.prev_frame_info['prev_bev'],
-            gt_bboxes_3d=gt_bboxes_3d,
-            gt_labels_3d=gt_labels_3d,
-            ego_his_trajs=ego_his_trajs[0],
-            ego_fut_trajs=ego_fut_trajs[0],
-            ego_fut_cmd=ego_fut_cmd[0],
-            ego_lcf_feat=ego_lcf_feat[0],
-            gt_attr_labels=gt_attr_labels,
-            **kwargs
-        )
-        # During inference, we save the BEV features and ego motion of each timestamp.
-        self.prev_frame_info['prev_pos'] = tmp_pos
-        self.prev_frame_info['prev_angle'] = tmp_angle
-        self.prev_frame_info['prev_bev'] = new_prev_bev
-
-        return bbox_results
-
-    def simple_test(
-        self,
-        img_metas,
-        gt_bboxes_3d,
-        gt_labels_3d,
-        img=None,
-        prev_bev=None,
-        points=None,
-        fut_valid_flag=None,
-        rescale=False,
-        ego_his_trajs=None,
-        ego_fut_trajs=None,
-        ego_fut_cmd=None,
-        ego_lcf_feat=None,
-        gt_attr_labels=None,
-        **kwargs
-    ):
         """Test function without augmentaiton."""
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
+        data['img_feats'] = img_feats
         bbox_list = [dict() for i in range(len(img_metas))]
-        new_prev_bev, bbox_pts, metric_dict = self.simple_test_pts(
-            img_feats,
-            img_metas,
-            gt_bboxes_3d,
-            gt_labels_3d,
-            prev_bev,
-            fut_valid_flag=fut_valid_flag,
-            rescale=rescale,
-            start=None,
-            ego_his_trajs=ego_his_trajs,
-            ego_fut_trajs=ego_fut_trajs,
-            ego_fut_cmd=ego_fut_cmd,
-            ego_lcf_feat=ego_lcf_feat,
-            gt_attr_labels=gt_attr_labels,
-        )
+        new_prev_bev, bbox_pts, metric_dict = self.simple_test_pts(data, prev_bev)
+
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
             result_dict['metric_results'] = metric_dict
 
         return new_prev_bev, bbox_list
 
-    def simple_test_pts(
-        self,
-        x,
-        img_metas,
-        gt_bboxes_3d,
-        gt_labels_3d,
-        prev_bev=None,
-        fut_valid_flag=None,
-        rescale=False,
-        start=None,
-        ego_his_trajs=None,
-        ego_fut_trajs=None,
-        ego_fut_cmd=None,
-        ego_lcf_feat=None,
-        gt_attr_labels=None,
-    ):
-        """Test function"""
-        mapped_class_names = [
-            'car', 'truck', 'construction_vehicle', 'bus',
-            'trailer', 'barrier', 'motorcycle', 'bicycle', 
-            'pedestrian', 'traffic_cone'
-        ]
+    def simple_test_pts(self, data, prev_bev=None):
+        x = data['img_feats']
+        img_metas = data['img_metas'][0]
+        gt_bboxes_3d = data['gt_bboxes_3d']
+        gt_labels_3d = data['gt_labels_3d']
+        fut_valid_flag = data['fut_valid_flag']
+        ego_his_trajs = data['ego_his_trajs'][0]
+        ego_fut_trajs = data['ego_fut_trajs'][0]
+        ego_fut_cmd = data['ego_fut_cmd'][0]
+        ego_lcf_feat = data['ego_lcf_feat'][0]
+        gt_attr_labels = data['gt_attr_labels']
 
-        outs = self.pts_bbox_head(x, img_metas, prev_bev=prev_bev,
-                                  ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat)
-        bbox_list = self.pts_bbox_head.get_bboxes(outs, img_metas, rescale=rescale)
+        """Test function"""
+        mapped_class_names = ['car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier', 'motorcycle', 
+                              'bicycle', 'pedestrian', 'traffic_cone']
+
+        outs = self.pts_bbox_head(x, img_metas, prev_bev=prev_bev, ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat)
+        bbox_list = self.pts_bbox_head.get_bboxes(outs, img_metas, rescale=True)
 
         bbox_results = []
         for i, (bboxes, scores, labels, trajs, map_bboxes, \
