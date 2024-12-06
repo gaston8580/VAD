@@ -548,6 +548,13 @@ class VADHead(DETRHead):
                 prev_bev=prev_bev
         )
 
+        # bev_embed: bev features
+        # hs: agent_query
+        # init_reference: reference points init
+        # inter_references: reference points processing
+        # map_hs: map_query
+        # map_init_reference: reference points init
+        # map_inter_references: reference points processing
         bev_embed, hs, init_reference, inter_references, map_hs, map_init_reference, map_inter_references = outputs
 
         hs = hs.permute(0, 2, 1, 3)

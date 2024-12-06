@@ -366,11 +366,11 @@ class VADPerceptionTransformerTRT(BaseModule):
         map_reference_points = map_reference_points.sigmoid()
         map_init_reference_out = map_reference_points        
 
-        query = query.permute(1, 0, 2)
-        query_pos = query_pos.permute(1, 0, 2)
-        map_query = map_query.permute(1, 0, 2)
-        map_query_pos = map_query_pos.permute(1, 0, 2)
-        bev_embed = bev_embed.permute(1, 0, 2)
+        query = query.permute(1, 0, 2)  # [num_agent, bs, embed_dims], agent_query
+        query_pos = query_pos.permute(1, 0, 2)  # [num_agent, bs, embed_dims]
+        map_query = map_query.permute(1, 0, 2)  # [num_pl, bs, embed_dims]
+        map_query_pos = map_query_pos.permute(1, 0, 2)  # [num_pl, bs, embed_dims]
+        bev_embed = bev_embed.permute(1, 0, 2)  # [bev_h*bev_w, bs, embed_dims]
 
         if self.decoder is not None:
             # [L, Q, B, D], [L, B, Q, D]

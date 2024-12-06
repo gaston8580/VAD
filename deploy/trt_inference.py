@@ -106,6 +106,7 @@ def single_gpu_test(model, data_loader):
     results = []
     dataset = data_loader.dataset
     prog_bar = mmcv.ProgressBar(len(dataset))
+    
     for i, data in enumerate(data_loader):
         infer_data = {}
         for key in data.keys():
@@ -113,14 +114,16 @@ def single_gpu_test(model, data_loader):
                 infer_data[key] = [sub_data.data[0] if isinstance(sub_data, DataContainer) else sub_data for sub_data in data[key]]
             else:
                 infer_data[key] = data[key].data[0] if isinstance(data[key], DataContainer) else data[key]
+        
         with torch.no_grad():
-            result = model(infer_data)
+            result = model(infer_data)  # inference
         
         results.extend(result)
         batch_size = len(result)
         for _ in range(batch_size):
             prog_bar.update()
         break
+    
     return results
 
 

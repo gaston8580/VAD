@@ -548,16 +548,23 @@ class VADHeadTRT(DETRHead):
                 prev_bev=prev_bev
         )
 
+        # bev_embed: bev features
+        # hs(hidden states): agent_query
+        # init_reference: reference points init
+        # inter_references: reference points processing
+        # map_hs: map_query
+        # map_init_reference: reference points init
+        # map_inter_references: reference points processing
         bev_embed, hs, init_reference, inter_references, map_hs, map_init_reference, map_inter_references = outputs
 
-        hs = hs.permute(0, 2, 1, 3)
+        hs = hs.permute(0, 2, 1, 3)  # agent_query, (l, bs, 300, 256), l为层数
         outputs_classes = []
         outputs_coords = []
-        outputs_coords_bev = []
+        outputs_coords_bev = []  # bev decode出的(x, y)坐标
         outputs_trajs = []
         outputs_trajs_classes = []
 
-        map_hs = map_hs.permute(0, 2, 1, 3)
+        map_hs = map_hs.permute(0, 2, 1, 3)  # map_query, (l, bs, 2000, 256)
         map_outputs_classes = []
         map_outputs_coords = []
         map_outputs_pts_coords = []
@@ -569,10 +576,11 @@ class VADHeadTRT(DETRHead):
             else:
                 reference = inter_references[lvl - 1]
             reference = inverse_sigmoid(reference)
-            outputs_class = self.cls_branches[lvl](hs[lvl])
-            tmp = self.reg_branches[lvl](hs[lvl])
+            outputs_class = self.cls_branches[lvl](hs[lvl])  # 每个agent的预测类别，(bs, 300, 10)
+            tmp = self.reg_branches[lvl](hs[lvl])  # 每个agent的预测坐标，(bs, 300, 10)
 
             # TODO: check the shape of reference
+            # pc_range: [xmin, ymin, zmin, xmax, ymax, zmax], 故tmp[0]为x, tmp[1]为y, tmp[4]为z
             assert reference.shape[-1] == 3
             tmp[..., 0:2] = tmp[..., 0:2] + reference[..., 0:2]
             tmp[..., 0:2] = tmp[..., 0:2].sigmoid()
@@ -594,9 +602,10 @@ class VADHeadTRT(DETRHead):
             else:
                 reference = map_inter_references[lvl - 1]
             reference = inverse_sigmoid(reference)
+            # 每个map polyline的预测类别，(bs, 100, 3)
             map_outputs_class = self.map_cls_branches[lvl](map_hs[lvl].view(bs,self.map_num_vec, 
                                                                             self.map_num_pts_per_vec,-1).mean(2))
-            tmp = self.map_reg_branches[lvl](map_hs[lvl])
+            tmp = self.map_reg_branches[lvl](map_hs[lvl])  # 每个map point的预测坐标，(bs, 2000, 2)
             # TODO: check the shape of reference
             assert reference.shape[-1] == 2
             tmp[..., 0:2] += reference[..., 0:2]
@@ -684,7 +693,6 @@ class VADHeadTRT(DETRHead):
         outputs_trajs.append(outputs_traj)
         outputs_traj_class = self.traj_cls_branches[0](motion_hs)
         outputs_trajs_classes.append(outputs_traj_class.squeeze(-1))
-        (batch, num_agent) = motion_hs.shape[:2]
              
         map_outputs_classes = torch.stack(map_outputs_classes)
         map_outputs_coords = torch.stack(map_outputs_coords)
@@ -695,7 +703,7 @@ class VADHeadTRT(DETRHead):
         outputs_trajs = torch.stack(outputs_trajs)
         outputs_trajs_classes = torch.stack(outputs_trajs_classes)
 
-        # planning
+        ############# planning #############
         (batch, num_agent) = motion_hs.shape[:2]
         if self.ego_his_encoder is not None:
             ego_his_feats = self.ego_his_encoder(ego_his_trajs)  # [B, 1, dim]
